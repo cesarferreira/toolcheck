@@ -1,0 +1,38 @@
+[package]
+name = "toolcheck"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Check team tool versions and explain required upgrades"
+license = "MIT"
+authors = ["Cesar Ferreira"]
+repository = "https://github.com/cesarferreira/toolcheck"
+
+[[bin]]
+name = "toolcheck"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+semver = "1"
+regex = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[test]]
+name = "cli"
+path = "src/main_test.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
