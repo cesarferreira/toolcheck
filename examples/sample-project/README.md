@@ -30,7 +30,7 @@ independent of real tool installations and avoids probing their versions.
 | opendhu (`aa`) | `0.9.0` | Minimum `1.2.3`, warning severity | Warn; version read from stderr |
 | extra | Missing | Optional | Skipped |
 
-The summary is **3 passed, 1 warning, 0 errors, 1 skipped**, with exit code `0`.
+The summary is **3 passed, 1 warning, 1 skipped**, with exit code `0`.
 The robin fixture prints a separate build version, so the regex selects its
 release version. The openDHU floor is illustrative.
 
@@ -38,6 +38,7 @@ Try JSON output and strict checks:
 
 ```sh
 PATH="$PWD/bin" "$TOOLCHECK" check --json
+PATH="$PWD/bin" "$TOOLCHECK" check --verbose # Full paths and explanations
 PATH="$PWD/bin" "$TOOLCHECK" check --strict
 # Strict mode exits 1 because of the openDHU warning.
 ```

@@ -109,6 +109,7 @@ upgrade = "mise install"
 ```bash
 toolcheck                          # Same as toolcheck check
 toolcheck check --strict           # Warnings also fail CI
+toolcheck check --verbose          # Include paths and full explanations
 toolcheck --config config/team.toml --json
 ```
 
@@ -174,6 +175,11 @@ Unprobed installations remain listed with `issue = "not_probed"`.
 
 ### Results and limits
 
+Human output uses a compact table, with guidance for warnings and failures.
+Colors are automatic in terminals; `NO_COLOR` disables automatic color.
+Use `--color always` or `--color never` to override, and `--verbose` for paths,
+reasons, and every shadowed installation. JSON output is unchanged by these flags.
+
 | Exit | Meaning |
 | --- | --- |
 | `0` | Acceptable, including warnings unless `--strict` |
@@ -190,7 +196,7 @@ logical name, and a summary. Each tool has `status` (`pass`, `warn`, `error`,
 `skipped`), `issue`, `actual`, `required`, `selected_path`, `shadowed`, `reason`,
 `remediation`, and `message`. Unknown values are `null`; path bytes that cannot be
 represented in UTF-8 use replacement characters. Configuration/invocation errors
-instead have `error_kind` and `error`. There is no progress or color output.
+instead have `error_kind` and `error`. JSON contains no progress or color output.
 
 Each probe captures at most **64 KiB total** across stdout and stderr with bounded
 reader buffers. Standard input is closed. Deadlines include waiting for child

@@ -1,12 +1,13 @@
 mod check;
 mod init;
+mod output;
 mod policy;
 mod process;
 mod version;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::json;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -27,6 +28,33 @@ struct Cli {
     /// Treat warnings as unmet requirements
     #[arg(long, global = true)]
     strict: bool,
+    /// Show executable paths, reasons, and all shadowed installations
+    #[arg(short, long, global = true)]
+    verbose: bool,
+    /// When to colorize human-readable check output
+    #[arg(long, global = true, value_enum, default_value = "auto")]
+    color: ColorMode,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum ColorMode {
+    Auto,
+    Always,
+    Never,
+}
+
+impl ColorMode {
+    fn enabled(self) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Never => false,
+            Self::Auto => {
+                io::stdout().is_terminal()
+                    && std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty())
+                    && std::env::var_os("TERM").is_none_or(|value| value != "dumb")
+            }
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -94,7 +122,7 @@ fn run(cli: &Cli) -> anyhow::Result<(String, u8)> {
     let output = if cli.json {
         serde_json::to_string_pretty(&report)? + "\n"
     } else {
-        check::human(&report)
+        output::human(&report, cli.verbose, cli.color.enabled())
     };
     Ok((output, if report.summary.acceptable { 0 } else { 1 }))
 }

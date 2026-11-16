@@ -48,11 +48,16 @@ impl Fixture {
     }
 
     fn run(&self, args: &[&str]) -> Output {
+        self.run_env(args, &[])
+    }
+
+    fn run_env(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
         let mut child = Command::new(env!("CARGO_BIN_EXE_toolcheck"))
             .args(args)
             .current_dir(self.root.path())
             .env_clear()
             .env("PATH", std::env::join_paths(&self.bins).unwrap())
+            .envs(env.iter().copied())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -100,7 +105,7 @@ fn numeric_ordering_and_human_guidance() {
     );
     assert_eq!(t["reason"], "Graphics support");
     assert_eq!(t["remediation"], "never-run-this");
-    let output = f.run(&["check"]);
+    let output = f.run(&["check", "--verbose"]);
     let human = String::from_utf8(output.stdout).unwrap();
     for text in [
         "PASS",
@@ -632,4 +637,139 @@ fn init_does_not_create_missing_parent_directories() {
         "configuration"
     );
     assert!(!f.root.path().join("missing").exists());
+}
+
+#[test]
+fn human_output_is_compact_for_passing_tools() {
+    let f = Fixture::new();
+    f.tool(0, "a", "echo 1.2.3");
+    f.policy("[tools.a]\nminimum='1'\nreason='Long explanation'\nupgrade='upgrade command'");
+    let result = f.run(&["check"]);
+    assert!(result.status.success());
+    let text = String::from_utf8(result.stdout).unwrap();
+    assert!(text.contains("1.2.3") && text.contains(">=1.0.0"), "{text}");
+    assert!(
+        !text.contains("Long explanation") && !text.contains("upgrade command"),
+        "{text}"
+    );
+    assert!(!text.contains(f.bins[0].to_str().unwrap()), "{text}");
+    assert!(!text.contains("installed version meets policy"), "{text}");
+    assert!(
+        text.lines().filter(|l| !l.trim().is_empty()).count() <= 3,
+        "{text}"
+    );
+    assert!(!text.contains('\x1b'), "piped output should be plain");
+}
+
+#[test]
+fn verbose_human_output_keeps_paths_reasons_and_remediation() {
+    let f = Fixture::new();
+    f.tool(0, "a", "echo 1.2.3");
+    f.policy("[tools.a]\nminimum='1'\nreason='Long explanation'\nupgrade='upgrade command'");
+    let result = f.run(&["check", "--verbose"]);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let text = String::from_utf8(result.stdout).unwrap();
+    assert!(
+        text.contains("Long explanation") && text.contains("upgrade command"),
+        "{text}"
+    );
+    assert!(text.contains(f.bins[0].to_str().unwrap()), "{text}");
+}
+
+#[test]
+fn warnings_keep_actionable_guidance_without_repeating_boilerplate() {
+    let f = Fixture::new();
+    f.tool(0, "a", "echo 0.5");
+    f.policy(
+        "[tools.a]\nminimum='1'\nseverity='warn'\nreason='Team workflow'\nupgrade='mise install a'",
+    );
+    let result = f.run(&[]);
+    assert!(result.status.success());
+    let text = String::from_utf8(result.stdout).unwrap();
+    assert!(
+        text.contains("WARN") && text.contains("mise install a"),
+        "{text}"
+    );
+    assert_eq!(text.matches("mise install a").count(), 1);
+    assert!(
+        text.contains("1 warning") && !text.contains("1 warnings"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("installed version does not meet policy"),
+        "{text}"
+    );
+    assert!(
+        text.lines().filter(|l| !l.trim().is_empty()).count() <= 4,
+        "{text}"
+    );
+    let strict = f.run(&["--strict"]);
+    assert_eq!(strict.status.code(), Some(1));
+    assert!(String::from_utf8(strict.stdout).unwrap().contains("strict"));
+}
+
+#[test]
+fn color_can_be_forced_or_disabled_without_changing_json() {
+    let f = Fixture::new();
+    f.tool(0, "a", "echo 1.2.3");
+    f.policy("[tools.a]\nminimum='1'");
+    let colored = f.run(&["--color", "always"]);
+    assert!(
+        colored.status.success(),
+        "{}",
+        String::from_utf8_lossy(&colored.stderr)
+    );
+    assert!(colored.stdout.contains(&0x1b));
+    let plain = f.run(&["--color", "never"]);
+    assert!(plain.status.success());
+    assert!(!plain.stdout.contains(&0x1b));
+    let no_color = f.run_env(&[], &[("NO_COLOR", "1")]);
+    assert!(no_color.status.success());
+    assert!(!no_color.stdout.contains(&0x1b));
+    let json = f.json(&["--color", "always", "--verbose"], 0);
+    assert_eq!(json["tools"][0]["actual"], "1.2.3");
+}
+
+#[test]
+fn compact_output_preserves_unknown_failures_and_compatible_path_hints() {
+    let f = Fixture::new();
+    f.policy("[tools.a]\nminimum='1'");
+    f.tool(0, "a", "echo mystery");
+    let unknown = f.run(&[]);
+    assert_eq!(unknown.status.code(), Some(1));
+    let text = String::from_utf8(unknown.stdout).unwrap();
+    assert!(
+        text.contains("unknown") && text.contains("version_regex"),
+        "{text}"
+    );
+    f.tool(0, "a", "echo 0.5");
+    f.tool(1, "a", "echo 1.5");
+    let mismatch = f.run(&[]);
+    assert_eq!(mismatch.status.code(), Some(1));
+    let text = String::from_utf8(mismatch.stdout).unwrap();
+    assert!(
+        text.contains("PATH") && text.contains(f.bins[1].to_str().unwrap()),
+        "{text}"
+    );
+}
+
+#[test]
+fn human_table_aligns_wide_unicode_tool_names() {
+    let f = Fixture::new();
+    f.tool(0, "a", "echo 1.2.3");
+    f.policy(
+        "[tools.aaaa]\ncommand='a'\nminimum='1'\n[tools.'界界界界']\ncommand='a'\nminimum='1'",
+    );
+    let result = f.run(&[]);
+    assert!(result.status.success());
+    let text = String::from_utf8(result.stdout).unwrap();
+    let ascii = text.lines().find(|line| line.contains("aaaa")).unwrap();
+    let wide = text.lines().find(|line| line.contains("界界界界")).unwrap();
+    // Each of these four CJK characters occupies two terminal cells.
+    let wide_as_cells = wide.replace("界界界界", "xxxxxxxx");
+    assert_eq!(ascii.find("1.2.3"), wide_as_cells.find("1.2.3"), "{text}");
 }

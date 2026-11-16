@@ -149,55 +149,6 @@ fn check(tool: &Tool) -> ToolResult {
     result
 }
 
-pub fn human(report: &Report) -> String {
-    let mut output = String::new();
-    for tool in &report.tools {
-        output.push_str(&format!(
-            "{} {}: installed {}; required {}\n",
-            tool.status.to_uppercase(),
-            tool.name,
-            tool.actual.as_deref().unwrap_or("unknown"),
-            tool.required
-        ));
-        output.push_str(&format!(
-            "  Executable: {}\n  {}\n",
-            tool.selected_path
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "not found".into()),
-            tool.message
-        ));
-        if let Some(reason) = &tool.reason {
-            output.push_str(&format!("  Reason: {reason}\n"));
-        }
-        if let Some(upgrade) = &tool.remediation {
-            output.push_str(&format!("  Upgrade (display only): {upgrade}\n"));
-        }
-        for shadow in &tool.shadowed {
-            output.push_str(&format!(
-                "  Shadowed: {} ({}; {})\n",
-                shadow.path.display(),
-                shadow.actual.as_deref().unwrap_or("unknown"),
-                shadow.message
-            ));
-        }
-    }
-    let s = &report.summary;
-    output.push_str(&format!(
-        "{} passed, {} warnings, {} errors, {} skipped — {}\n",
-        s.pass,
-        s.warn,
-        s.error,
-        s.skipped,
-        if s.acceptable {
-            "acceptable"
-        } else {
-            "requirements unmet"
-        }
-    ));
-    output
-}
-
 #[cfg(test)]
 #[path = "check_test.rs"]
 mod tests;
