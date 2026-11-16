@@ -62,6 +62,10 @@ make build-release
 <a id="quickstart"></a>
 ## Quickstart
 
+For a runnable example with bundled fake executables and predictable results,
+see the [sample project](examples/sample-project/README.md). It demonstrates pins,
+custom commands, warnings, and optional tools without installing those tools.
+
 Create a starter policy in your project:
 
 ```bash
