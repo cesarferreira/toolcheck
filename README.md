@@ -23,10 +23,8 @@
 
 Requires [Rust](https://rustup.rs) **1.85+** and `~/.cargo/bin` on your `PATH`.
 
-From this checkout (the MVP has not been published):
-
 ```bash
-cargo install --path . --locked
+cargo install toolcheck --locked
 ```
 
 Verify:
@@ -39,7 +37,8 @@ toolcheck --help
 <summary><strong>Build from source</strong> — for development or unreleased changes</summary>
 
 ```bash
-cd /path/to/toolcheck
+git clone https://github.com/cesarferreira/toolcheck.git
+cd toolcheck
 cargo install --path . --locked
 # or
 make install-release
