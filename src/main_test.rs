@@ -498,3 +498,138 @@ fn invalid_utf8_version_output_is_unknown() {
     assert_eq!(json["tools"][0]["issue"], "unknown_version");
     assert!(json["tools"][0]["actual"].is_null());
 }
+
+#[test]
+fn init_creates_a_valid_starter_with_inactive_examples() {
+    let f = Fixture::new();
+    let output = f.run(&["init"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("toolcheck.toml")
+    );
+    let source = fs::read_to_string(f.root.path().join("toolcheck.toml")).unwrap();
+    let manifest: toml::Value = toml::from_str(&source).unwrap();
+    assert_eq!(manifest["schema_version"].as_integer(), Some(1));
+    assert!(manifest.get("tools").is_none());
+    assert!(source.contains("# [tools.dekit]") && source.contains("# [tools.opendhu]"));
+    assert_eq!(f.json(&[], 0)["summary"]["pass"], 0);
+}
+
+#[test]
+fn init_infers_plain_pins_without_running_commands() {
+    let f = Fixture::new();
+    fs::write(f.root.path().join(".ruby-version"), "v3.3\n").unwrap();
+    fs::write(f.root.path().join(".bazelversion"), "7.4.1\n").unwrap();
+    f.tool(0, "ruby", "echo ran > marker; echo 3.3.0");
+    f.tool(0, "bazel", "echo 7.4.1");
+    let report = f.json(&["init"], 0);
+    assert_eq!(report["status"], "created");
+    assert_eq!(report["tools"][0]["name"], "bazel");
+    assert_eq!(report["tools"][1]["name"], "ruby");
+    assert!(!f.root.path().join("marker").exists());
+    let manifest: toml::Value =
+        toml::from_str(&fs::read_to_string(f.root.path().join("toolcheck.toml")).unwrap()).unwrap();
+    assert_eq!(
+        manifest["tools"]["ruby"]["exact_from"].as_str(),
+        Some(".ruby-version")
+    );
+    assert!(manifest["tools"]["ruby"].get("exact").is_none());
+    assert_eq!(f.json(&[], 0)["summary"]["pass"], 2);
+}
+
+#[test]
+fn init_never_overwrites_an_existing_policy_or_symlink() {
+    let f = Fixture::new();
+    let path = f.root.path().join("toolcheck.toml");
+    fs::write(&path, "user work, even if invalid TOML").unwrap();
+    assert_eq!(f.json(&["init"], 2)["error_kind"], "configuration");
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "user work, even if invalid TOML"
+    );
+    fs::remove_file(&path).unwrap();
+    symlink("missing-target", &path).unwrap();
+    assert_eq!(f.json(&["init"], 2)["error_kind"], "configuration");
+    assert_eq!(
+        fs::read_link(&path).unwrap(),
+        PathBuf::from("missing-target")
+    );
+    assert!(!f.root.path().join("missing-target").exists());
+}
+
+#[test]
+fn init_discovers_beside_a_custom_manifest_and_writes_relative_pins() {
+    let f = Fixture::new();
+    let folder = f.root.path().join("config");
+    fs::create_dir(&folder).unwrap();
+    fs::write(folder.join(".python-version"), "3.12.4\n").unwrap();
+    fs::write(f.root.path().join(".ruby-version"), "3.3.0\n").unwrap();
+    let report = f.json(&["init", "--config", "config/team.toml"], 0);
+    assert_eq!(report["config"], "config/team.toml");
+    assert_eq!(report["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(report["tools"][0]["name"], "python");
+    f.tool(0, "python", "echo Python 3.12.4");
+    assert_eq!(
+        f.json(&["--config", "config/team.toml"], 0)["summary"]["pass"],
+        1
+    );
+    assert!(!f.root.path().join("toolcheck.toml").exists());
+}
+
+#[test]
+fn init_reports_unsupported_pins_instead_of_guessing() {
+    let f = Fixture::new();
+    fs::write(f.root.path().join(".nvmrc"), "lts/*\n").unwrap();
+    fs::write(f.root.path().join(".ruby-version"), "ruby-3.3.0\n").unwrap();
+    fs::write(f.root.path().join(".python-version"), "3.12.4\n").unwrap();
+    let report = f.json(&["init"], 0);
+    assert_eq!(report["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(report["tools"][0]["name"], "python");
+    assert_eq!(report["warnings"].as_array().unwrap().len(), 2);
+    let source = fs::read_to_string(f.root.path().join("toolcheck.toml")).unwrap();
+    assert!(source.contains(".nvmrc") && source.contains(".ruby-version"));
+    let manifest: toml::Value = toml::from_str(&source).unwrap();
+    assert!(manifest["tools"].get("node").is_none());
+    assert!(manifest["tools"].get("ruby").is_none());
+}
+
+#[test]
+fn init_requires_manual_choice_for_conflicting_node_pins() {
+    let f = Fixture::new();
+    fs::write(f.root.path().join(".node-version"), "20.11.0\n").unwrap();
+    fs::write(f.root.path().join(".nvmrc"), "22.1.0\n").unwrap();
+    let report = f.json(&["init"], 0);
+    assert!(report["tools"].as_array().unwrap().is_empty());
+    assert_eq!(report["warnings"].as_array().unwrap().len(), 1);
+    assert!(report["warnings"][0].as_str().unwrap().contains("conflict"));
+    let manifest: toml::Value =
+        toml::from_str(&fs::read_to_string(f.root.path().join("toolcheck.toml")).unwrap()).unwrap();
+    assert!(manifest.get("tools").is_none());
+}
+
+#[test]
+fn init_deduplicates_equivalent_node_pins() {
+    let f = Fixture::new();
+    fs::write(f.root.path().join(".node-version"), "v22.1\n").unwrap();
+    fs::write(f.root.path().join(".nvmrc"), "22.1.0\n").unwrap();
+    let report = f.json(&["init"], 0);
+    assert_eq!(report["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(report["tools"][0]["exact_from"], ".node-version");
+    assert!(report["warnings"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn init_does_not_create_missing_parent_directories() {
+    let f = Fixture::new();
+    assert_eq!(
+        f.json(&["init", "--config", "missing/team.toml"], 2)["error_kind"],
+        "configuration"
+    );
+    assert!(!f.root.path().join("missing").exists());
+}

@@ -1,4 +1,5 @@
 mod check;
+mod init;
 mod policy;
 mod process;
 mod version;
@@ -17,7 +18,7 @@ use std::process::ExitCode;
 struct Cli {
     #[command(subcommand)]
     command: Option<Action>,
-    /// Manifest to check (relative pins resolve beside this file)
+    /// Manifest to check or create (relative pins resolve beside this file)
     #[arg(long, global = true, default_value = "toolcheck.toml")]
     config: PathBuf,
     /// Emit a single deterministic JSON report
@@ -32,6 +33,8 @@ struct Cli {
 enum Action {
     /// Check installed versions against the manifest (also the default action)
     Check,
+    /// Create a starter policy from nearby version pins and commented examples
+    Init,
 }
 
 fn emit_error(json_output: bool, kind: &str, error: &str) {
@@ -59,18 +62,12 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
     };
-    let tools = match policy::load(&cli.config) {
-        Ok(tools) => tools,
+    let (output, code) = match run(&cli) {
+        Ok(result) => result,
         Err(error) => {
             emit_error(cli.json, "configuration", &format!("{error:#}"));
             return ExitCode::from(2);
         }
-    };
-    let report = check::run(&tools, cli.strict);
-    let output = if cli.json {
-        serde_json::to_string_pretty(&report).expect("report serialization") + "\n"
-    } else {
-        check::human(&report)
     };
     if let Err(error) = io::stdout().lock().write_all(output.as_bytes()) {
         let _ = writeln!(
@@ -79,5 +76,25 @@ fn main() -> ExitCode {
         );
         return ExitCode::from(2);
     }
-    ExitCode::from(if report.summary.acceptable { 0 } else { 1 })
+    ExitCode::from(code)
+}
+
+fn run(cli: &Cli) -> anyhow::Result<(String, u8)> {
+    if matches!(cli.command, Some(Action::Init)) {
+        let report = init::create(&cli.config)?;
+        let output = if cli.json {
+            serde_json::to_string_pretty(&report)? + "\n"
+        } else {
+            init::human(&report)
+        };
+        return Ok((output, 0));
+    }
+    let tools = policy::load(&cli.config)?;
+    let report = check::run(&tools, cli.strict);
+    let output = if cli.json {
+        serde_json::to_string_pretty(&report)? + "\n"
+    } else {
+        check::human(&report)
+    };
+    Ok((output, if report.summary.acceptable { 0 } else { 1 }))
 }
